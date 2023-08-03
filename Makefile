@@ -5,4 +5,4 @@ run: build
 	./bin/k0yote
 
 test:
-	go test ./... -v -race
+	go test ./...
