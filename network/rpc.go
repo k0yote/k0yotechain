@@ -13,8 +13,8 @@ import (
 type MessageType byte
 
 const (
-	MessageTypeTx MessageType = 0x1
-	MessageTypeBlock
+	MessageTypeTx    MessageType = 0x1
+	MessageTypeBlock MessageType = 0x2
 )
 
 type RPC struct {
@@ -40,14 +40,14 @@ func (msg *Message) Bytes() []byte {
 	return buf.Bytes()
 }
 
-type DecodeMessage struct {
+type DecodedMessage struct {
 	From NetAddr
 	Data any
 }
 
-type RPCDecodeFunc func(RPC) (*DecodeMessage, error)
+type RPCDecodeFunc func(RPC) (*DecodedMessage, error)
 
-func DefaultRPCDecodeFunc(rpc RPC) (*DecodeMessage, error) {
+func DefaultRPCDecodeFunc(rpc RPC) (*DecodedMessage, error) {
 	msg := Message{}
 	if err := gob.NewDecoder(rpc.Payload).Decode(&msg); err != nil {
 		return nil, fmt.Errorf("failed to decode message from %s:%s", rpc.From, err)
@@ -64,9 +64,19 @@ func DefaultRPCDecodeFunc(rpc RPC) (*DecodeMessage, error) {
 		if err := tx.Decode(core.NewGobTxDecoder(bytes.NewReader(msg.Data))); err != nil {
 			return nil, err
 		}
-		return &DecodeMessage{
+		return &DecodedMessage{
 			From: rpc.From,
 			Data: tx,
+		}, nil
+	case MessageTypeBlock:
+		block := new(core.Block)
+		if err := block.Decode(core.NewGobBlockDecoder(bytes.NewReader(msg.Data))); err != nil {
+			return nil, err
+		}
+
+		return &DecodedMessage{
+			From: rpc.From,
+			Data: block,
 		}, nil
 	default:
 		return nil, fmt.Errorf("invalid message header %x", msg.Header)
@@ -74,5 +84,5 @@ func DefaultRPCDecodeFunc(rpc RPC) (*DecodeMessage, error) {
 }
 
 type RPCProcessor interface {
-	ProcessMessage(*DecodeMessage) error
+	ProcessMessage(*DecodedMessage) error
 }
