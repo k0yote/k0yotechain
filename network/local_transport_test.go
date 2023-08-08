@@ -2,14 +2,20 @@ package network
 
 import (
 	"io/ioutil"
+	"net"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
 
+var (
+	dummy, _ = net.ResolveTCPAddr("tcp", "A")
+)
+
 func TestConnect(t *testing.T) {
-	tra := NewLocalTransport("A")
-	trb := NewLocalTransport("B")
+
+	tra := NewLocalTransport(dummy)
+	trb := NewLocalTransport(dummy)
 
 	tra.Connect(trb)
 	trb.Connect(tra)
@@ -18,8 +24,8 @@ func TestConnect(t *testing.T) {
 }
 
 func TestSendMessge(t *testing.T) {
-	tra := NewLocalTransport("A")
-	trb := NewLocalTransport("B")
+	tra := NewLocalTransport(dummy)
+	trb := NewLocalTransport(dummy)
 
 	tra.Connect(trb)
 	trb.Connect(tra)
@@ -36,9 +42,9 @@ func TestSendMessge(t *testing.T) {
 }
 
 func TestBroadcast(t *testing.T) {
-	tra := NewLocalTransport("A")
-	trb := NewLocalTransport("B")
-	trc := NewLocalTransport("C")
+	tra := NewLocalTransport(dummy)
+	trb := NewLocalTransport(dummy)
+	trc := NewLocalTransport(dummy)
 
 	tra.Connect(trc)
 	tra.Connect(trb)
