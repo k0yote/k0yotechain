@@ -11,9 +11,9 @@ func TestStack(t *testing.T) {
 	s.Push(1)
 	s.Push("a")
 
-	assert.Equal(t, 1, s.Pop())
-
 	assert.Equal(t, "a", s.Pop())
+
+	assert.Equal(t, 1, s.Pop())
 }
 
 func TestStackBytes(t *testing.T) {

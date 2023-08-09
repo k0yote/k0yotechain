@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"log"
 	"net"
+	"time"
 
 	"github.com/k0yote/privatechain/core"
 	"github.com/k0yote/privatechain/crypto"
@@ -21,9 +22,16 @@ func main() {
 
 	remoteNodeB := makeServer("REMOTE_NODE_B", nil, ":4001", nil)
 	go remoteNodeB.Start()
-	// time.Sleep(1 * time.Second)
 
-	// tcpTester()
+	go func() {
+		time.Sleep(7 * time.Second)
+		lateNode := makeServer("LATE_NODE", nil, ":4002", []string{":4000"})
+		go lateNode.Start()
+	}()
+
+	time.Sleep(1 * time.Second)
+
+	tcpTester()
 
 	select {}
 }
