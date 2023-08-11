@@ -2,8 +2,10 @@ package main
 
 import (
 	"bytes"
+	"io"
 	"log"
 	"net"
+	"net/http"
 	"time"
 
 	"github.com/k0yote/privatechain/core"
@@ -13,35 +15,45 @@ import (
 
 func main() {
 	privKey := crypto.GeneratePrivateKey()
-	localNode := makeServer("LOCAL_NODE", &privKey, ":3000", []string{":4000"})
-
+	localNode := makeServer("LOCAL_NODE", &privKey, ":3000", []string{":4000"}, ":9000")
 	go localNode.Start()
 
-	remoteNodeA := makeServer("REMOTE_NODE_A", nil, ":4000", []string{":4001"})
+	remoteNodeA := makeServer("REMOTE_NODE_A", nil, ":4000", []string{":4001"}, "")
 	go remoteNodeA.Start()
 
-	remoteNodeB := makeServer("REMOTE_NODE_B", nil, ":4001", nil)
+	remoteNodeB := makeServer("REMOTE_NODE_B", nil, ":4001", nil, "")
 	go remoteNodeB.Start()
 
 	go func() {
-		time.Sleep(7 * time.Second)
-		lateNode := makeServer("LATE_NODE", nil, ":4002", []string{":4000"})
+		time.Sleep(20 * time.Second)
+		lateNode := makeServer("LATE_NODE", nil, ":4002", []string{":4000"}, "")
 		go lateNode.Start()
 	}()
 
 	time.Sleep(1 * time.Second)
 
-	tcpTester()
+	// tcpTester()
+
+	// time.Sleep(1 * time.Second)
+	txSendTicker := time.NewTicker(1 * time.Second)
+	go func() {
+		for {
+			txSender()
+
+			<-txSendTicker.C
+		}
+	}()
 
 	select {}
 }
 
-func makeServer(id string, pk *crypto.PrivateKey, addr string, seedNodes []string) *network.Server {
+func makeServer(id string, pk *crypto.PrivateKey, addr string, seedNodes []string, apiListenAddr string) *network.Server {
 	opts := network.ServerOpts{
-		SeedNodes:  seedNodes,
-		ListenAddr: addr,
-		PrivateKey: pk,
-		ID:         id,
+		APIListenAddr: apiListenAddr,
+		SeedNodes:     seedNodes,
+		ListenAddr:    addr,
+		PrivateKey:    pk,
+		ID:            id,
 	}
 
 	s, err := network.NewServer(opts)
@@ -50,6 +62,33 @@ func makeServer(id string, pk *crypto.PrivateKey, addr string, seedNodes []strin
 	}
 
 	return s
+}
+
+func txSender() {
+	privkey := crypto.GeneratePrivateKey()
+
+	tx := core.NewTransaction(contract())
+	tx.Sign(privkey)
+	buf := &bytes.Buffer{}
+	if err := tx.Encode(core.NewGobTxEncoder(buf)); err != nil {
+		log.Fatal(err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, "http://localhost:9000/tx", buf)
+	if err != nil {
+		panic(err)
+	}
+
+	client := http.Client{}
+	res, err := client.Do(req)
+	if err != nil {
+		panic(err)
+	}
+
+	_, err = io.ReadAll(res.Body)
+	if err != nil {
+		panic(err)
+	}
 }
 
 func tcpTester() {

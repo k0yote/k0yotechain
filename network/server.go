@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/go-kit/log"
+	"github.com/k0yote/privatechain/api"
 	"github.com/k0yote/privatechain/core"
 	"github.com/k0yote/privatechain/crypto"
 	"github.com/k0yote/privatechain/types"
@@ -19,6 +20,7 @@ import (
 var defaultBlockTime = 5 * time.Second
 
 type ServerOpts struct {
+	APIListenAddr string
 	SeedNodes     []string
 	ListenAddr    string
 	TCPTransport  *TCPTransport
@@ -42,6 +44,7 @@ type Server struct {
 	isValidator bool
 	rpcCh       chan RPC
 	quitCh      chan struct{}
+	txChan      chan *core.Transaction
 }
 
 func NewServer(opts ServerOpts) (*Server, error) {
@@ -61,6 +64,20 @@ func NewServer(opts ServerOpts) (*Server, error) {
 		return nil, err
 	}
 
+	txChan := make(chan *core.Transaction)
+
+	if len(opts.APIListenAddr) > 0 {
+		apiServerCfg := api.ServerConfig{
+			Logger:     opts.Logger,
+			ListenAddr: opts.APIListenAddr,
+		}
+		apiServer := api.NewServer(apiServerCfg, chain, txChan)
+
+		go apiServer.Start()
+
+		opts.Logger.Log("msg", "JSON API server running on %s", opts.APIListenAddr)
+	}
+
 	peerCh := make(chan *TCPPeer)
 	tr := NewTCPTransport(opts.ListenAddr, peerCh)
 
@@ -74,6 +91,7 @@ func NewServer(opts ServerOpts) (*Server, error) {
 		isValidator:  opts.PrivateKey != nil,
 		rpcCh:        make(chan RPC),
 		quitCh:       make(chan struct{}, 1),
+		txChan:       txChan,
 	}
 
 	s.TCPTransport.peerCh = peerCh
@@ -128,6 +146,10 @@ free:
 
 			s.Logger.Log("msg", "peer added to the server", "outgoing", peer.Outgoing, "addr", peer.conn.RemoteAddr())
 
+		case tx := <-s.txChan:
+			if err := s.processTransaction(tx); err != nil {
+				s.Logger.Log("process TX error", err)
+			}
 		case rpc := <-s.rpcCh:
 			msg, err := s.RPCDecodeFunc(rpc)
 			if err != nil {
@@ -188,7 +210,7 @@ func (s *Server) processGetBlocksMessage(from net.Addr, data *GetBlocksMessage) 
 	)
 
 	if data.To == 0 {
-		for i := 0; i < int(ourHeight); i++ {
+		for i := int(data.From); i <= int(ourHeight); i++ {
 			block, err := s.chain.GetBlock(uint32(i))
 			if err != nil {
 				return err
@@ -252,8 +274,10 @@ func (s *Server) processBlocksMessage(from net.Addr, data *BlocksMessage) error 
 	s.Logger.Log("msg", "received BLOCKS message", "from", from)
 
 	for _, block := range data.Blocks {
+		fmt.Printf("BLOCK => %+v\n", block)
 		if err := s.chain.AddBlock(block); err != nil {
-			return err
+			fmt.Printf("adding block error => %sv\n", err)
+			continue
 		}
 	}
 
@@ -268,27 +292,9 @@ func (s *Server) processStatusMessage(from net.Addr, data *StatusMessage) error 
 		return nil
 	}
 
-	getBlocksMessage := &GetBlocksMessage{
-		From: s.chain.Height(),
-		To:   0,
-	}
+	go s.requestBlocksLoop(from)
 
-	buf := new(bytes.Buffer)
-	if err := gob.NewEncoder(buf).Encode(getBlocksMessage); err != nil {
-		return err
-	}
-
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	peer, ok := s.peerMap[from]
-	if !ok {
-		return fmt.Errorf("peer %s not known", peer.conn.RemoteAddr())
-	}
-
-	msg := NewMessage(MessageTypeGetBlocks, buf.Bytes())
-
-	return peer.Send(msg.Bytes())
+	return nil
 }
 
 func (s *Server) processGetStatusMessage(from net.Addr, data *GetStatusMessage) error {
@@ -351,6 +357,40 @@ func (s *Server) processTransaction(tx *core.Transaction) error {
 	return nil
 }
 
+func (s *Server) requestBlocksLoop(peer net.Addr) error {
+	ticker := time.NewTicker(3 * time.Second)
+	for {
+		ourHeight := s.chain.Height()
+		s.Logger.Log("msg", "requesting new blocks", "currentHeight", ourHeight)
+
+		getBlocksMessage := &GetBlocksMessage{
+			From: ourHeight + 1,
+			To:   0,
+		}
+
+		buf := new(bytes.Buffer)
+		if err := gob.NewEncoder(buf).Encode(getBlocksMessage); err != nil {
+			return err
+		}
+
+		s.mu.RLock()
+		defer s.mu.RUnlock()
+
+		peer, ok := s.peerMap[peer]
+		if !ok {
+			return fmt.Errorf("peer %s not known", peer.conn.RemoteAddr())
+		}
+
+		msg := NewMessage(MessageTypeGetBlocks, buf.Bytes())
+
+		if err := peer.Send(msg.Bytes()); err != nil {
+			s.Logger.Log("error", "failed to send to peer", "err", err, "peer", peer)
+		}
+
+		<-ticker.C
+	}
+}
+
 func (s *Server) broadcastBlock(b *core.Block) error {
 	buf := &bytes.Buffer{}
 	if err := b.Encode(core.NewGobBlockEncoder(buf)); err != nil {
@@ -409,5 +449,11 @@ func genesisBlock() *core.Block {
 	}
 
 	b, _ := core.NewBlock(header, nil)
+
+	privKey := crypto.GeneratePrivateKey()
+	if err := b.Sign(privKey); err != nil {
+		panic(err)
+	}
+
 	return b
 }

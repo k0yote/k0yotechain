@@ -2,23 +2,25 @@ package core
 
 import (
 	"fmt"
+	"math/rand"
 
 	"github.com/k0yote/privatechain/crypto"
 	"github.com/k0yote/privatechain/types"
 )
 
 type Transaction struct {
-	Data []byte
-
+	Data      []byte
 	From      crypto.PublicKey
 	Signature *crypto.Signature
+	Nonce     int64
 
 	hash types.Hash
 }
 
 func NewTransaction(data []byte) *Transaction {
 	return &Transaction{
-		Data: data,
+		Data:  data,
+		Nonce: rand.Int63n(1000000000000000000),
 	}
 }
 

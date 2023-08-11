@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/go-kit/log"
+	"github.com/k0yote/privatechain/types"
 )
 
 type Blockchain struct {
@@ -13,6 +14,8 @@ type Blockchain struct {
 	lock          sync.RWMutex
 	headers       []*Header
 	blocks        []*Block
+	txStore       map[types.Hash]*Transaction
+	blockStore    map[types.Hash]*Block
 	validator     Validator
 	contractState *State
 }
@@ -24,6 +27,8 @@ func NewBlockchain(l log.Logger, genesis *Block) (*Blockchain, error) {
 		store:         NewMemoryStore(),
 		logger:        l,
 		contractState: NewState(),
+		blockStore:    make(map[types.Hash]*Block),
+		txStore:       make(map[types.Hash]*Transaction),
 	}
 	bc.validator = NewBlockValidator(bc)
 	err := bc.addBlockWithoutValidation(genesis)
@@ -52,6 +57,18 @@ func (bc *Blockchain) AddBlock(b *Block) error {
 	return bc.addBlockWithoutValidation(b)
 }
 
+func (bc *Blockchain) GetBlockByHash(hash types.Hash) (*Block, error) {
+	bc.lock.Lock()
+	defer bc.lock.Unlock()
+
+	block, ok := bc.blockStore[hash]
+	if !ok {
+		return nil, fmt.Errorf("block with hash (%s) not found", hash)
+	}
+
+	return block, nil
+}
+
 func (bc *Blockchain) GetBlock(height uint32) (*Block, error) {
 	if height > bc.Height() {
 		return nil, fmt.Errorf("given height (%d) too high", height)
@@ -74,6 +91,18 @@ func (bc *Blockchain) GetHeader(height uint32) (*Header, error) {
 	return bc.headers[height], nil
 }
 
+func (bc *Blockchain) GetTxByHash(hash types.Hash) (*Transaction, error) {
+	bc.lock.Lock()
+	defer bc.lock.Unlock()
+
+	tx, ok := bc.txStore[hash]
+	if !ok {
+		return nil, fmt.Errorf("transaction with hash (%s) not found", hash)
+	}
+
+	return tx, nil
+}
+
 func (bc *Blockchain) HasBlock(height uint32) bool {
 	return height <= bc.Height()
 }
@@ -86,10 +115,16 @@ func (bc *Blockchain) Height() uint32 {
 }
 
 func (bc *Blockchain) addBlockWithoutValidation(b *Block) error {
-	bc.lock.RLock()
+	bc.lock.Lock()
 	bc.headers = append(bc.headers, b.Header)
 	bc.blocks = append(bc.blocks, b)
-	defer bc.lock.RUnlock()
+	bc.blockStore[b.Hash(BlockHasher{})] = b
+
+	for _, tx := range b.Transactions {
+		bc.txStore[tx.Hash(TxHasher{})] = tx
+	}
+
+	defer bc.lock.Unlock()
 
 	bc.logger.Log(
 		"msg", "new block",
