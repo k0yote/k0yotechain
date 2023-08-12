@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"log"
 	"net"
@@ -11,40 +12,74 @@ import (
 	"github.com/k0yote/privatechain/core"
 	"github.com/k0yote/privatechain/crypto"
 	"github.com/k0yote/privatechain/network"
+	"github.com/k0yote/privatechain/types"
+	"github.com/k0yote/privatechain/util"
 )
 
 func main() {
-	privKey := crypto.GeneratePrivateKey()
-	localNode := makeServer("LOCAL_NODE", &privKey, ":3000", []string{":4000"}, ":9000")
+	validatorPrivKey := crypto.GeneratePrivateKey()
+	localNode := makeServer("LOCAL_NODE", &validatorPrivKey, ":3000", []string{":4000"}, ":9000")
 	go localNode.Start()
 
-	remoteNodeA := makeServer("REMOTE_NODE_A", nil, ":4000", []string{":4001"}, "")
-	go remoteNodeA.Start()
+	remoteNode := makeServer("REMOTE_NODE", nil, ":4000", []string{":5000"}, "")
+	go remoteNode.Start()
 
-	remoteNodeB := makeServer("REMOTE_NODE_B", nil, ":4001", nil, "")
+	remoteNodeB := makeServer("REMOTE_NODE_B", nil, ":5000", nil, "")
 	go remoteNodeB.Start()
 
 	go func() {
-		time.Sleep(20 * time.Second)
-		lateNode := makeServer("LATE_NODE", nil, ":4002", []string{":4000"}, "")
+		time.Sleep(11 * time.Second)
+
+		lateNode := makeServer("LATE_NODE", nil, ":6000", []string{":4000"}, "")
 		go lateNode.Start()
 	}()
 
 	time.Sleep(1 * time.Second)
 
-	// tcpTester()
+	// collectionOwnerPrivKey := crypto.GeneratePrivateKey()
+	// // txSendTicker := time.NewTicker(1 * time.Second)
 
-	// time.Sleep(1 * time.Second)
-	txSendTicker := time.NewTicker(1 * time.Second)
-	go func() {
-		for {
-			txSender()
+	// collectionHash := createCollectionTx(collectionOwnerPrivKey)
+	// go func() {
+	// 	for i := 0; i < 20; i++ {
+	// 		nftMinter(collectionOwnerPrivKey, collectionHash)
+	// 	}
+	// }()
 
-			<-txSendTicker.C
-		}
-	}()
+	// if err := sendTransaction(validatorPrivKey); err != nil {
+	// 	panic(err)
+	// }
 
 	select {}
+}
+
+func sendTransaction(privKey crypto.PrivateKey) error {
+	toPrivKey := crypto.GeneratePrivateKey()
+
+	tx := core.Transaction{
+		To:    toPrivKey.PublicKey(),
+		Value: 10,
+	}
+
+	if err := tx.Sign(privKey); err != nil {
+		return err
+	}
+
+	buf := &bytes.Buffer{}
+	if err := tx.Encode(core.NewGobTxEncoder(buf)); err != nil {
+		return err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, "http://localhost:9000/tx", buf)
+	if err != nil {
+		return err
+	}
+
+	client := http.Client{}
+	_, err = client.Do(req)
+
+	return err
+
 }
 
 func makeServer(id string, pk *crypto.PrivateKey, addr string, seedNodes []string, apiListenAddr string) *network.Server {
@@ -64,11 +99,59 @@ func makeServer(id string, pk *crypto.PrivateKey, addr string, seedNodes []strin
 	return s
 }
 
-func txSender() {
-	privkey := crypto.GeneratePrivateKey()
+func createCollectionTx(privKey crypto.PrivateKey) types.Hash {
+	tx := core.NewTransaction(nil)
+	tx.TxInner = core.CollectionTx{
+		Fee:      10,
+		MetaData: []byte("My NFT collection"),
+	}
 
-	tx := core.NewTransaction(contract())
-	tx.Sign(privkey)
+	tx.Sign(privKey)
+	buf := &bytes.Buffer{}
+	if err := tx.Encode(core.NewGobTxEncoder(buf)); err != nil {
+		log.Fatal(err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, "http://localhost:9000/tx", buf)
+	if err != nil {
+		panic(err)
+	}
+
+	client := http.Client{}
+	res, err := client.Do(req)
+	if err != nil {
+		panic(err)
+	}
+
+	_, err = io.ReadAll(res.Body)
+	if err != nil {
+		panic(err)
+	}
+
+	return tx.Hash(core.TxHasher{})
+}
+
+func nftMinter(privKey crypto.PrivateKey, collection types.Hash) {
+	metaData := map[string]any{
+		"power":  1,
+		"health": 2,
+	}
+
+	mbuf := new(bytes.Buffer)
+	if err := json.NewEncoder(mbuf).Encode(metaData); err != nil {
+		panic(err)
+	}
+
+	tx := core.NewTransaction(nil)
+	tx.TxInner = core.MintTx{
+		Fee:             10,
+		NFT:             util.RandomHash(),
+		MetaData:        mbuf.Bytes(),
+		Collection:      collection,
+		CollectionOwner: privKey.PublicKey(),
+	}
+
+	tx.Sign(privKey)
 	buf := &bytes.Buffer{}
 	if err := tx.Encode(core.NewGobTxEncoder(buf)); err != nil {
 		log.Fatal(err)
@@ -113,84 +196,6 @@ func tcpTester() {
 		panic(err)
 	}
 }
-
-// var (
-// 	transports = []network.Transport{
-// 		network.NewLocalTransport("LOCAL"),
-// 		network.NewLocalTransport("REMOTE_A"),
-// 		network.NewLocalTransport("REMOTE_B"),
-// 		network.NewLocalTransport("REMOTE_C"),
-// 		network.NewLocalTransport("LATE_REMOTE"),
-// 	}
-// )
-
-// func main() {
-// 	initRemoteServers(transports)
-
-// 	localNode := transports[0]
-// 	remoteNodeA := transports[1]
-// 	remoteNodeC := transports[3]
-
-// 	go func() {
-// 		for {
-// 			if err := sendTransaction(remoteNodeA, localNode.Addr()); err != nil {
-// 				logrus.Error(err)
-// 			}
-// 			time.Sleep(2 * time.Second)
-// 		}
-// 	}()
-
-// 	go func() {
-// 		time.Sleep(7 * time.Second)
-// 		trLate := transports[len(transports)-1]
-// 		remoteNodeC.Connect(trLate)
-// 		lateServer := makeServer(string(trLate.Addr()), trLate, nil)
-// 		go lateServer.Start()
-// 	}()
-
-// 	privKey := crypto.GeneratePrivateKey()
-
-// 	localServer := makeServer("LOCAL", transports[0], &privKey)
-// 	localServer.Start()
-// }
-
-// func initRemoteServers(trs []network.Transport) {
-// 	for i := 0; i < len(trs); i++ {
-// 		id := fmt.Sprintf("REMOTE_%d", i+1)
-// 		s := makeServer(id, trs[i], nil)
-// 		go s.Start()
-// 	}
-// }
-
-// func sendGetStatusMessage(tr network.Transport, to network.NetAddr) error {
-// 	var (
-// 		getStatausMsg = new(network.GetStatusMessage)
-// 		buf           = new(bytes.Buffer)
-// 	)
-
-// 	if err := gob.NewEncoder(buf).Encode(getStatausMsg); err != nil {
-// 		return nil
-// 	}
-
-// 	msg := network.NewMessage(network.MessageTypeGetStatus, buf.Bytes())
-
-// 	return tr.SendMessage(to, msg.Bytes())
-// }
-
-// func sendTransaction(tr network.Transport, to network.NetAddr) error {
-// 	privkey := crypto.GeneratePrivateKey()
-
-// 	tx := core.NewTransaction(contract())
-// 	tx.Sign(privkey)
-// 	buf := &bytes.Buffer{}
-// 	if err := tx.Encode(core.NewGobTxEncoder(buf)); err != nil {
-// 		return err
-// 	}
-
-// 	msg := network.NewMessage(network.MessageTypeTx, buf.Bytes())
-
-// 	return tr.SendMessage(to, msg.Bytes())
-// }
 
 func contract() []byte {
 	data := []byte{0x02, 0x0a, 0x03, 0x0a, 0x0b, 0x4f, 0x0c, 0x4f, 0x0c, 0x46, 0x0c, 0x03, 0x0a, 0x0d, 0x0f}

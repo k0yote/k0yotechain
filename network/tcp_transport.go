@@ -13,11 +13,8 @@ type TCPPeer struct {
 }
 
 func (p *TCPPeer) Send(b []byte) error {
-	if _, err := p.conn.Write(b); err != nil {
-		return err
-	}
-
-	return nil
+	_, err := p.conn.Write(b)
+	return err
 }
 
 func (p *TCPPeer) readLoop(rpcCh chan RPC) {
@@ -28,7 +25,7 @@ func (p *TCPPeer) readLoop(rpcCh chan RPC) {
 			continue
 		}
 		if err != nil {
-			fmt.Printf("read error %s\n", err)
+			fmt.Printf("read error: %s\n", err)
 			continue
 		}
 
