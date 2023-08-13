@@ -3,7 +3,7 @@ package core
 import (
 	"bytes"
 	"crypto/sha256"
-	"encoding/gob"
+	"encoding/binary"
 
 	"github.com/k0yote/privatechain/types"
 )
@@ -23,9 +23,12 @@ type TxHasher struct{}
 
 func (TxHasher) Hash(tx *Transaction) types.Hash {
 	buf := new(bytes.Buffer)
-	if err := gob.NewEncoder(buf).Encode(tx); err != nil {
-		panic(err)
-	}
+
+	_ = binary.Write(buf, binary.LittleEndian, tx.Data)
+	_ = binary.Write(buf, binary.LittleEndian, tx.To)
+	_ = binary.Write(buf, binary.LittleEndian, tx.Value)
+	_ = binary.Write(buf, binary.LittleEndian, tx.From)
+	_ = binary.Write(buf, binary.LittleEndian, tx.Nonce)
 
 	return types.Hash(sha256.Sum256(buf.Bytes()))
 }

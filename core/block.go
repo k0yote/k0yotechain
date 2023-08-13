@@ -84,6 +84,7 @@ func (b *Block) Verify() error {
 		return fmt.Errorf("block has no signature")
 	}
 
+	fmt.Printf("%+v\n", b.Header)
 	if !b.Signature.Verify(b.Validator, b.Header.Bytes()) {
 		return fmt.Errorf("invalid block signature")
 	}

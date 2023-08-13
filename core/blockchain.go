@@ -149,31 +149,44 @@ func (bc *Blockchain) Height() uint32 {
 	return uint32(len(bc.headers) - 1)
 }
 
+func (bc *Blockchain) handleTransaction(tx *Transaction) error {
+	if len(tx.Data) > 0 {
+		bc.logger.Log("msg", "executing code", "len", len(tx.Data), "hash", tx.Hash(&TxHasher{}))
+
+		vm := NewVM(tx.Data, bc.contractState)
+		if err := vm.Run(); err != nil {
+			return err
+		}
+	}
+
+	if tx.TxInner != nil {
+		if err := bc.handleNativeNFT(tx); err != nil {
+			return err
+		}
+	}
+
+	if tx.Value > 0 {
+		if err := bc.handleNativeTransfer(tx); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func (bc *Blockchain) addBlockWithoutValidation(b *Block) error {
 	bc.stateLock.Lock()
 
-	for _, tx := range b.Transactions {
-		if len(tx.Data) > 0 {
-			bc.logger.Log("msg", "executing code", "len", len(tx.Data), "hash", tx.Hash(&TxHasher{}))
+	for i := 0; i < len(b.Transactions); i++ {
+		tx := b.Transactions[i]
+		if err := bc.handleTransaction(tx); err != nil {
+			bc.logger.Log("error", err)
 
-			vm := NewVM(tx.Data, bc.contractState)
-			if err := vm.Run(); err != nil {
-				return err
-			}
+			b.Transactions[i] = b.Transactions[len(b.Transactions)-1]
+			b.Transactions = b.Transactions[:len(b.Transactions)-1]
+
+			continue
 		}
-
-		if tx.TxInner != nil {
-			if err := bc.handleNativeNFT(tx); err != nil {
-				return err
-			}
-		}
-
-		if tx.Value > 0 {
-			if err := bc.handleNativeTransfer(tx); err != nil {
-				return err
-			}
-		}
-
 	}
 
 	defer bc.stateLock.Unlock()

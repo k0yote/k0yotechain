@@ -7,10 +7,27 @@ import (
 	"testing"
 
 	"github.com/k0yote/privatechain/crypto"
+	"github.com/k0yote/privatechain/types"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestNativeTransferTransactional(t *testing.T) {
+func TestVerifyTransactionWithTamper(t *testing.T) {
+	tx := NewTransaction(nil)
+	from := crypto.GeneratePrivateKey()
+	to := crypto.GeneratePrivateKey()
+	hacker := crypto.GeneratePrivateKey()
+
+	tx.From = from.PublicKey()
+	tx.To = to.PublicKey()
+	tx.Value = 1_000
+	assert.Nil(t, tx.Sign(from))
+	tx.hash = types.Hash{}
+	tx.To = hacker.PublicKey()
+
+	assert.NotNil(t, tx.Verify())
+}
+
+func TestNativeTransferTransaction(t *testing.T) {
 	fromPrivKey := crypto.GeneratePrivateKey()
 	toPrivKey := crypto.GeneratePrivateKey()
 	tx := &Transaction{
@@ -39,6 +56,7 @@ func TestNFTTransaction(t *testing.T) {
 	tx.Sign(privKey)
 	buf := new(bytes.Buffer)
 	assert.Nil(t, gob.NewEncoder(buf).Encode(tx))
+	tx.hash = types.Hash{}
 
 	txDecoded := &Transaction{}
 	assert.Nil(t, gob.NewDecoder(buf).Decode(txDecoded))
@@ -74,6 +92,7 @@ func TestTxEncodeDecode(t *testing.T) {
 	tx := randomTxWithSignature(t)
 	buf := &bytes.Buffer{}
 	assert.Nil(t, tx.Encode(NewGobTxEncoder(buf)))
+	tx.hash = types.Hash{}
 
 	txDecoded := new(Transaction)
 	assert.Nil(t, txDecoded.Decode(NewGobTxDecoder(buf)))

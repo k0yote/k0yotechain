@@ -3,26 +3,18 @@ package core
 import (
 	"testing"
 
-	"github.com/k0yote/privatechain/crypto"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestAccountStateTransferNoBalance(t *testing.T) {
-	state := NewAccountState()
+func TestState(t *testing.T) {
 
-	from := crypto.GeneratePrivateKey().PublicKey().Address()
-	to := crypto.GeneratePrivateKey().PublicKey().Address()
-	amount := uint64(10)
-
-	assert.NotNil(t, state.Transfer(from, to, amount))
-}
-
-func TestAccountStateTransferSuccess(t *testing.T) {
-	state := NewAccountState()
-	from := crypto.GeneratePrivateKey().PublicKey().Address()
-
-	to := crypto.GeneratePrivateKey().PublicKey().Address()
-	amount := uint64(10)
-
-	assert.Nil(t, state.Transfer(from, to, amount))
+	state := NewState()
+	assert.True(t, len(state.data) == 0)
+	assert.Nil(t, state.Put([]byte("key"), []byte("value")))
+	value, err := state.Get([]byte("key"))
+	assert.Nil(t, err)
+	assert.Equal(t, []byte("value"), value)
+	assert.Nil(t, state.Delete([]byte("key")))
+	_, err = state.Get([]byte("key"))
+	assert.NotNil(t, err)
 }
